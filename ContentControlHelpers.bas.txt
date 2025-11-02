@@ -1,0 +1,449 @@
+Attribute VB_Name = "ContentControlHelpers"
+'=== MODULE: ContentControlHelpers ===
+Option Explicit
+
+Public Function FindControlByTag(tagId As String) As ContentControl
+    Dim cc As ContentControl
+    For Each cc In ThisDocument.contentControls
+        If Len(cc.tag) > 0 And cc.tag = tagId Then
+            Set FindControlByTag = cc
+            Exit Function
+        End If
+    Next cc
+    Set FindControlByTag = Nothing
+End Function
+
+Public Function FindContentControlByTitle(ByVal title As String) As ContentControl
+    Dim cc As ContentControl
+    For Each cc In ThisDocument.contentControls
+        If cc.title = title Then
+            Set FindContentControlByTitle = cc
+            Exit Function
+        End If
+    Next cc
+    Set FindContentControlByTitle = Nothing
+End Function
+
+Public Function GetStepNumberFromId(ByVal compoundId As String) As Long
+    Dim baseTag As String
+    Dim stepControl As ContentControl
+
+    On Error GoTo ErrorHandler
+
+    If Len(compoundId) < 5 Then
+        GetStepNumberFromId = 0
+        Exit Function
+    End If
+
+    baseTag = Left(compoundId, 5) & "01"
+    Set stepControl = FindControlByTag(baseTag)
+
+    If Not stepControl Is Nothing Then
+        If IsNumeric(stepControl.Range.text) Then
+            GetStepNumberFromId = CLng(stepControl.Range.text)
+        End If
+    End If
+
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "Error in GetStepNumberFromId: " & Err.Description
+    GetStepNumberFromId = 0
+End Function
+
+Public Function GetUnitOperationFromId(ByVal compoundId As String) As String
+    Dim baseTag As String
+    Dim unitControl As ContentControl
+
+    On Error GoTo ErrorHandler
+
+    If Len(compoundId) < 5 Then
+        GetUnitOperationFromId = ""
+        Exit Function
+    End If
+
+    baseTag = Left(compoundId, 5) & "01"
+    Set unitControl = FindControlByTag(baseTag)
+
+    If Not unitControl Is Nothing Then
+        GetUnitOperationFromId = unitControl.title
+    Else
+        GetUnitOperationFromId = ""
+    End If
+
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "Error in GetUnitOperationFromId: " & Err.Description
+    GetUnitOperationFromId = ""
+End Function
+
+Public Function ParentContentControlTitled(expectedTitle As String, cc As ContentControl) As Boolean
+    On Error GoTo ErrorHandler
+
+    Dim currentControl As ContentControl
+    Dim level As Integer
+    Set currentControl = cc
+    level = 0
+
+    Do While Not currentControl Is Nothing
+        If StrComp(currentControl.title, expectedTitle, vbTextCompare) = 0 Then
+            ParentContentControlTitled = True
+            Exit Function
+        End If
+        Set currentControl = currentControl.ParentContentControl
+        level = level + 1
+    Loop
+
+    ParentContentControlTitled = False
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "!! Error in ParentContentControlTitled: " & Err.Description
+    Err.Clear
+    ParentContentControlTitled = False
+End Function
+
+
+
+Public Sub ContentControlAfterDelete_ContentControlHelpers()
+    Dim Doc As Document: Set Doc = ThisDocument
+    Dim wasTracked As Boolean
+    On Error GoTo ErrorHandler
+
+    Debug.Print "[INFO] ContentControlAfterDelete called"
+
+    wasTracked = Doc.TrackRevisions
+    Doc.TrackRevisions = False
+
+    Call Renumber
+    Call PruneAllCollections
+
+    If IsTableUpdateEnabled() Then Call PopulateWSTable
+    If IsTableUpdateEnabled() Then Call PopulateBOMTable
+    If IsTableUpdateEnabled() Then Call PopulateMassBalanceTable
+
+    Doc.UndoClear
+
+Cleanup:
+    Doc.TrackRevisions = wasTracked
+    Exit Sub
+
+ErrorHandler:
+    Debug.Print "!! Error in ContentControlAfterDelete: " & Err.number & " - " & Err.Description
+    Resume Cleanup
+End Sub
+
+Public Sub ReportContentControlDetails(ByVal cc As ContentControl)
+    Dim hierarchyTitles As String
+    Dim hierarchyTags As String
+    Dim currentControl As ContentControl
+    Dim position As Long
+
+    hierarchyTitles = cc.title
+    hierarchyTags = cc.tag
+    position = cc.Range.Start
+
+    Set currentControl = cc
+    Do While Not currentControl.ParentContentControl Is Nothing
+        Set currentControl = currentControl.ParentContentControl
+        hierarchyTitles = currentControl.title & " > " & hierarchyTitles
+        hierarchyTags = currentControl.tag & " > " & hierarchyTags
+    Loop
+
+    Debug.Print "  Title: " & cc.title
+    Debug.Print "  Tag: " & cc.tag
+    Debug.Print "  Position: " & position
+    Debug.Print "  Hierarchy Titles: " & hierarchyTitles
+    Debug.Print "  Hierarchy Tags: " & hierarchyTags
+End Sub
+
+Public Function GetAllNestedContentControls(ccParent As ContentControl) As Collection
+    Dim allNested As New Collection
+    Dim seenIDs As Object
+    Set seenIDs = CreateObject("Scripting.Dictionary")
+
+    Dim childCC As ContentControl
+    Dim innerCCs As Collection
+    Dim inner As ContentControl
+
+    On Error GoTo ErrHandler
+
+    For Each childCC In ccParent.Range.contentControls
+        If Not seenIDs.Exists(childCC.id) Then
+            seenIDs.Add childCC.id, True
+            allNested.Add childCC
+        Else
+            'Debug.Print "  [Dedup] Skipped duplicate ID=" & childCC.ID & " Title=" & childCC.title
+        End If
+
+        Set innerCCs = GetAllNestedContentControls(childCC)
+        For Each inner In innerCCs
+            If Not seenIDs.Exists(inner.id) Then
+                seenIDs.Add inner.id, True
+                allNested.Add inner
+            Else
+                Debug.Print "  [Dedup] Skipped duplicate ID=" & inner.id & " Title=" & inner.title
+            End If
+        Next inner
+    Next childCC
+
+    Set GetAllNestedContentControls = allNested
+    Exit Function
+
+ErrHandler:
+    Debug.Print "[Error - Nested Collection] " & Err.number & ": " & Err.Description
+    Set GetAllNestedContentControls = allNested
+End Function
+
+Public Sub FlattenContentControlToRichText(ccTop As ContentControl)
+    Dim nestedControls As Collection
+    Dim cc As ContentControl
+    Dim ccRange As Range
+    Dim formattedText As Range
+    Dim i As Long
+    Dim flattenedCount As Long
+    Dim skippedCount As Long
+    Dim totalCount As Long
+
+    On Error GoTo ErrHandler
+    Debug.Print "[Flattening Started] Top-Level Control: " & ccTop.title & vbCrLf
+
+    Set nestedControls = GetAllNestedContentControls(ccTop)
+    Debug.Print "  Total Unique Nested Controls Found: " & nestedControls.count
+
+    For i = nestedControls.count To 1 Step -1
+        totalCount = totalCount + 1
+        Set cc = nestedControls(i)
+        Debug.Print vbCrLf & "[Flattening Control]"
+        ReportContentControlDetails cc
+
+        On Error Resume Next
+        If Not cc Is Nothing Then
+            Set ccRange = cc.Range
+            If Not ccRange Is Nothing Then
+                Set formattedText = ccRange.formattedText
+                If Not formattedText Is Nothing Then
+                    ccRange.formattedText = formattedText
+                    cc.Delete
+                    Debug.Print "  -> Flattened Successfully"
+                    flattenedCount = flattenedCount + 1
+                Else
+                    Debug.Print "  -> Skipped (FormattedText not available)"
+                    skippedCount = skippedCount + 1
+                End If
+            Else
+                Debug.Print "  -> Skipped (Invalid Range)"
+                skippedCount = skippedCount + 1
+            End If
+        Else
+            Debug.Print "  -> Skipped (Deleted Content Control)"
+            skippedCount = skippedCount + 1
+        End If
+        On Error GoTo ErrHandler
+    Next i
+
+    Debug.Print vbCrLf & "[Flattening Complete] All nested controls flattened."
+    Debug.Print "[Flattening Summary] Flattened: " & flattenedCount & ", Skipped: " & skippedCount & ", Attempted: " & totalCount
+    Exit Sub
+
+ErrHandler:
+    Debug.Print "[Error] " & Err.number & ": " & Err.Description
+    Resume Next
+End Sub
+
+Public Sub FlattenMiddleLayerContentControls(ccTop As ContentControl)
+    Dim nestedControls As Collection
+    Dim cc As ContentControl
+    Dim ccRange As Range
+    Dim formattedText As Range
+    Dim i As Long
+    Dim flattenedCount As Long
+    Dim skippedCount As Long
+    Dim totalCount As Long
+
+    On Error GoTo ErrHandler
+    'Debug.Print "[Selective Flattening Started] Top-Level Control: " & ccTop.title & vbCrLf
+
+    Set nestedControls = GetAllNestedContentControls(ccTop)
+    'Debug.Print "  Total Nested Controls Found: " & nestedControls.Count
+
+    For i = nestedControls.count To 1 Step -1
+        Set cc = nestedControls(i)
+        totalCount = totalCount + 1
+
+        Dim isTopLevel As Boolean: isTopLevel = cc.ParentContentControl Is Nothing
+        Dim isLeaf As Boolean: isLeaf = (cc.Range.contentControls.count = 0)
+
+        'Debug.Print vbCrLf & "[Check Control Layer]"
+        'ReportContentControlDetails cc
+
+        If Not isTopLevel And Not isLeaf Then
+            'Debug.Print "  -> Middle Layer Detected: Will Flatten"
+            On Error Resume Next
+            Set ccRange = cc.Range
+            If Not ccRange Is Nothing Then
+                Set formattedText = ccRange.formattedText
+                If Not formattedText Is Nothing Then
+                    ccRange.formattedText = formattedText
+                    cc.Delete
+                    'Debug.Print "  -> Flattened Successfully"
+                    flattenedCount = flattenedCount + 1
+                Else
+                    'Debug.Print "  -> Skipped (FormattedText not available)"
+                    skippedCount = skippedCount + 1
+                End If
+            Else
+                'Debug.Print "  -> Skipped (Invalid Range)"
+                skippedCount = skippedCount + 1
+            End If
+            On Error GoTo ErrHandler
+        Else
+            'Debug.Print "  -> Skipped (Top-level or Leaf node)"
+            skippedCount = skippedCount + 1
+        End If
+    Next i
+
+    Debug.Print vbCrLf & "[Selective Flattening Complete]"
+    Debug.Print "[Flattening Summary] Flattened: " & flattenedCount & ", Skipped: " & skippedCount & ", Attempted: " & totalCount
+    Exit Sub
+
+ErrHandler:
+    Debug.Print "[Error - FlattenMiddleLayerContentControls] " & Err.number & ": " & Err.Description
+    Resume Next
+End Sub
+
+' Returns the first table inside a content control with a given title
+Public Function GetTableFromContentControl(controlTitle As String) As Table
+    Dim cc As ContentControl
+    For Each cc In ThisDocument.contentControls
+        If cc.title = controlTitle Then
+            If cc.Range.Tables.count > 0 Then
+                Set GetTableFromContentControl = cc.Range.Tables(1)
+                Exit Function
+            Else
+                'Debug.Print "[INFO] ContentControl '" & controlTitle & "' found but contains no tables."
+            End If
+        End If
+    Next cc
+    Debug.Print "[WARN] ContentControl titled '" & controlTitle & "' not found."
+    Set GetTableFromContentControl = Nothing
+End Function
+
+Public Function FetchContentControlFromCell(ByVal cell As cell) As ContentControl
+    If cell.Range.contentControls.count > 0 Then
+        Set FetchContentControlFromCell = cell.Range.contentControls(1)
+    Else
+        Set FetchContentControlFromCell = Nothing
+    End If
+End Function
+
+' === Returns all content controls matching a specific tag ===
+Public Function FindControlsByTag(tagId As String) As Collection
+    Dim result As New Collection
+    Dim cc As ContentControl
+
+    On Error GoTo ErrorHandler
+    Debug.Print "[FindControlsByTag] Searching for tag: " & tagId
+
+    For Each cc In ThisDocument.contentControls
+        If Len(cc.tag) > 0 And cc.tag = tagId Then
+            result.Add cc
+            Debug.Print "[FindControlsByTag] Match found in range: " & cc.Range.text
+        End If
+    Next cc
+
+    Set FindControlsByTag = result
+    Debug.Print "[FindControlsByTag] Total matches: " & result.count
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "[ERROR] FindControlsByTag: " & Err.Description
+    Set FindControlsByTag = New Collection
+End Function
+
+
+' === Returns only content controls matching tag AND inside a titled parent ===
+Public Function FindControlsByTagInRegion(tagId As String, regionTitle As String) As Collection
+    Dim result As New Collection
+    Dim cc As ContentControl
+
+    On Error GoTo ErrorHandler
+    Debug.Print "[FindControlsByTagInRegion] Searching for tag: " & tagId & " in region: " & regionTitle
+
+    For Each cc In ThisDocument.contentControls
+        If Len(cc.tag) > 0 And cc.tag = tagId Then
+            If ParentContentControlTitled(regionTitle, cc) Then
+                result.Add cc
+                Debug.Print "[FindControlsByTagInRegion] Match found in region, range: " & cc.Range.text
+            End If
+        End If
+    Next cc
+
+    Set FindControlsByTagInRegion = result
+    Debug.Print "[FindControlsByTagInRegion] Total region matches: " & result.count
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "[ERROR] FindControlsByTagInRegion: " & Err.Description
+    Set FindControlsByTagInRegion = New Collection
+End Function
+
+Public Function ReturnSelectedContentControl() As ContentControl
+    Dim rng As Range
+    Dim docCC As ContentControl
+    Dim bestMatch As ContentControl
+    Dim bestRangeSize As Long
+
+    Set rng = Selection.Range
+
+    Set bestMatch = Nothing
+    bestRangeSize = 0
+
+    For Each docCC In ActiveDocument.contentControls
+        If docCC.Range.Start <= rng.Start And docCC.Range.End >= rng.End Then
+            If bestMatch Is Nothing Then
+                Set bestMatch = docCC
+                bestRangeSize = docCC.Range.End - docCC.Range.Start
+            ElseIf (docCC.Range.End - docCC.Range.Start) < bestRangeSize Then
+                Set bestMatch = docCC
+                bestRangeSize = docCC.Range.End - docCC.Range.Start
+            End If
+        End If
+    Next docCC
+
+    Set ReturnSelectedContentControl = bestMatch
+End Function
+
+'=== MODULE: ContentControlHelpers (extend) ===
+' Refresh all "input" fields in a ProcessDescription block to show low-detail text
+Public Sub RefreshInputFieldsLow()
+    Dim cc As ContentControl
+    Dim cmp As Compound
+    Dim refCmp As Compound
+    Dim coll As CompoundCollection
+
+    ' Get global compound collection and reference once
+    Set coll = GetGlobalCompoundCollection()
+    Set refCmp = coll.GetReferenceCompound()
+
+    Application.ScreenUpdating = False
+
+    ' Loop through every content control in the document
+    For Each cc In ThisDocument.contentControls
+        ' Only consider "input" fields inside a ProcessDescription block
+        If StrComp(cc.title, "input", vbTextCompare) = 0 _
+           And ParentContentControlTitled("ProcessDescription", cc) Then
+
+            ' Retrieve the compound by the CC tag
+            Set cmp = coll.GetById(cc.tag)
+            If Not cmp Is Nothing Then
+                ' Update display using low-detail
+                cc.Range.text = cmp.ToDisplayString("low", refCmp)
+                cc.Range.Font.Bold = True
+            End If
+        End If
+    Next cc
+
+    Application.ScreenUpdating = True
+End Sub

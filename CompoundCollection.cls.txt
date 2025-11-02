@@ -1,0 +1,503 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "CompoundCollection"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+'=== CLASS MODULE: CompoundCollection ===
+Option Explicit
+
+Private compounds As Collection
+Private referenceCompoundIdValue As String ' Stores the ID of the reference compound
+
+Private Sub Class_Initialize()
+    Set compounds = New Collection
+    referenceCompoundIdValue = ""
+End Sub
+
+
+
+Public Sub RemoveById(ByVal compoundId As String)
+    On Error Resume Next
+    compounds.Remove compoundId
+   If compoundId = referenceCompoundIdValue Then referenceCompoundIdValue = ""
+End Sub
+
+Public Function GetById(ByVal compoundId As String) As Compound
+    On Error Resume Next
+    Dim cmp As Compound
+    Set cmp = compounds(compoundId)
+    If Err.number <> 0 Then
+        'Debug.Print "[WARN] Compound not found: " & compoundId
+        Err.Clear
+        Set GetById = Nothing
+    Else
+        Set GetById = cmp
+    End If
+    On Error GoTo 0
+End Function
+
+Public Property Get count() As Long
+    count = compounds.count
+End Property
+
+Public Property Get item(index As Variant) As Compound
+    Set item = compounds(index)
+End Property
+
+'=== ReferenceCompoundId Property ===
+Public Property Get ReferenceCompoundId() As String
+    ReferenceCompoundId = referenceCompoundIdValue
+End Property
+
+
+Public Property Let ReferenceCompoundId(ByVal value As String)
+    If compounds Is Nothing Then
+        Err.Raise vbObjectError + 1001, "CompoundCollection", "Compound collection is not initialized."
+    End If
+
+    On Error GoTo ErrorHandler
+    Dim dummy As Compound
+    Set dummy = compounds(value)
+
+    If dummy Is Nothing Then
+        Err.Raise vbObjectError + 1002, "CompoundCollection", "Reference compound ID not found: " & value
+    End If
+
+    referenceCompoundIdValue = value
+    Exit Property
+
+ErrorHandler:
+    Err.Raise Err.number, "CompoundCollection.ReferenceCompoundId", "Error while setting reference: " & Err.Description
+End Property
+
+Public Function GetReferenceCompound() As Compound
+    Set GetReferenceCompound = Me.GetById(ReferenceCompoundId)
+End Function
+Public Sub Add(ByVal cmp As Compound)
+If GetById(cmp.id) Is Nothing Then
+    compounds.Add cmp, cmp.id
+    Me.SortByStepNumber
+Else
+    Debug.Print "[WARN] Duplicate compound ID skipped: " & cmp.id
+End If
+End Sub
+Public Sub Clone(oldTag As String, newTag As String)
+    On Error GoTo Handler
+
+    Dim original As Compound
+    Set original = Me.GetById(oldTag)
+    
+    If original Is Nothing Then
+        Debug.Print "[Clone] Compound not found: " & oldTag
+        Exit Sub
+    End If
+
+' Opertunity to push the cloning mechanism into the new collections.
+    Dim cloned As Compound
+    Set cloned = New Compound
+
+    cloned.id = newTag
+    Set cloned.Stoffdaten = original.Stoffdaten ' Shared reference
+    cloned.compoundType = original.compoundType
+
+    Dim clonedAmount As CompoundAmount
+    Set clonedAmount = New CompoundAmount
+    clonedAmount.SetMass original.amount.mass, original.Stoffdaten
+    clonedAmount.Assay = original.amount.Assay
+
+    Set cloned.amount = clonedAmount
+
+    Me.Add cloned
+    Debug.Print "[Clone] Compound cloned: " & oldTag & " ? " & newTag
+    Exit Sub
+
+Handler:
+    Debug.Print "[ERROR] CompoundCollection.Clone failed: " & Err.Description
+    Err.Clear
+End Sub
+
+
+Public Function FindByProductCode(ByVal code As String) As Collection
+    Dim result As New Collection
+    Dim cmp As Compound
+    For Each cmp In compounds
+        If LCase(cmp.Stoffdaten.productCode) = LCase(code) Then result.Add cmp
+    Next cmp
+    Set FindByProductCode = result
+End Function
+
+Public Function ToXml() As String
+    Dim xmlDoc As Object: Set xmlDoc = CreateObject("MSXML2.DOMDocument")
+    Dim root As Object: Set root = xmlDoc.createElement("Compounds")
+    root.setAttribute "xmlns", "urn:my-chem-namespace"
+    If ReferenceCompoundId <> "" Then root.setAttribute "referenceId", ReferenceCompoundId
+    xmlDoc.appendChild root
+
+    Dim cmp As Compound, node As Object
+    For Each cmp In compounds
+        Set node = cmp.ToXmlNode(xmlDoc)
+        root.appendChild node
+    Next cmp
+
+    ToXml = xmlDoc.xml
+End Function
+
+Public Sub LoadFromXml(xmlString As String)
+    Dim xmlDoc As Object: Set xmlDoc = CreateObject("MSXML2.DOMDocument")
+    xmlDoc.LoadXML xmlString
+
+    Dim nodes As Object, node As Object
+    Set nodes = xmlDoc.SelectNodes("//Compound")
+
+    Dim cmp As Compound
+    For Each node In nodes
+        Set cmp = New Compound
+        cmp.FromXmlNode node
+        Add cmp
+    Next node
+
+    Dim root As Object
+    Set root = xmlDoc.DocumentElement
+Dim refAttr As Object
+Set refAttr = root.Attributes.getNamedItem("referenceId")
+If Not refAttr Is Nothing Then
+    ReferenceCompoundId = refAttr.text
+End If
+ Me.SortByStepNumber
+End Sub
+
+'=== CompoundCollection: Validate Round Trip ===
+Public Sub ValidateRoundTripWithCheck()
+    Dim originalXml As String, reloadedXml As String
+    Dim reloaded As New CompoundCollection
+    Dim cmp As Compound, reCmp As Compound
+    Dim mismatchFound As Boolean: mismatchFound = False
+    Dim errorDetails As String
+
+    ' Step 1: Serialize original to XML
+    originalXml = Me.ToXml
+
+    ' Step 2: Save and Reload
+    Me.SaveToWord
+    If Not reloaded.LoadFromWord Then
+        MsgBox "[RoundTrip] Reload failed: no XML part found.", vbCritical
+        Exit Sub
+    End If
+
+    ' Step 3: Count Check
+    If Me.count <> reloaded.count Then
+        errorDetails = errorDetails & "- Compound count mismatch: " & Me.count & " vs " & reloaded.count & vbCrLf
+        mismatchFound = True
+    End If
+
+    ' Step 4: ID Check
+    Dim i As Long
+    For i = 1 To Me.count
+        Set cmp = Me.item(i)
+        Set reCmp = reloaded.GetById(cmp.id)
+        If reCmp Is Nothing Then
+            errorDetails = errorDetails & "- Missing compound ID after reload: " & cmp.id & vbCrLf
+            mismatchFound = True
+        End If
+    Next i
+
+    ' Step 5: Optional XML Round-Trip Match
+    reloadedXml = reloaded.ToXml
+    If originalXml <> reloadedXml Then
+        errorDetails = errorDetails & "- XML mismatch detected." & vbCrLf
+        mismatchFound = True
+    End If
+
+    ' Step 6: User-Facing Alert and Root Cause
+    If mismatchFound Then
+        Dim userMessage As String
+        userMessage = "CRITICAL ERROR: RoundTrip validation for COMPOUND COLLECTION failed and may lead to DATA LOSS." & vbCrLf & vbCrLf & _
+                      "Please take a PRINT SCREEN of this message and SEND the FILE to: klm" & vbCrLf & _
+                      "Then: Save the file as a new version, reload it, and scroll to the 'Mass Balance Table'." & vbCrLf & _
+                      "Use the macro ribbon to trigger table updates and check for lost compounds or waste entries." & vbCrLf & vbCrLf & _
+                      "--- DETAILS ---" & vbCrLf & errorDetails
+
+        MsgBox userMessage, vbCritical + vbOKOnly, "[CompoundRoundTrip] Validation Error"
+    End If
+End Sub
+
+' Requires: Reference to Microsoft XML, v6.0 (MSXML2)
+
+Public Sub SaveToWord()
+    On Error GoTo ErrHandler
+
+    Dim Doc As Document: Set Doc = ThisDocument
+    Dim part As Office.CustomXMLPart
+    Dim xmlString As String
+    Dim ns As String: ns = "urn:my-chem-namespace"
+
+    ' Clear old parts
+    For Each part In Doc.CustomXMLParts
+        If InStr(1, part.xml, ns, vbTextCompare) > 0 Then
+            part.Delete
+            Exit For
+        End If
+    Next part
+
+    ' Generate raw XML string (already sanitized per node)
+    xmlString = Me.ToXml
+
+    ' Validate XML structure before saving
+    If Not IsWellFormedXml(xmlString) Then
+        Debug.Print xmlString ' log full content if malformed
+        Err.Raise vbObjectError + 1001, , "Generated XML is not well-formed."
+    End If
+
+    ' Add sanitized and validated XML to custom part
+    Doc.CustomXMLParts.Add xmlString
+    'MsgBox "Compounds XML saved successfully.", vbInformation
+    Exit Sub
+
+ErrHandler:
+    Debug.Print "[SaveToWord Error]"
+    Debug.Print "Line: " & Erl
+    Debug.Print "Error " & Err.number & ": " & Err.Description
+    Debug.Print "XML Preview: " & Left(xmlString, 500) & "..." ' Truncate for safety
+
+    MsgBox "Error in SaveToWord:" & vbCrLf & _
+           "Line: " & Erl & vbCrLf & _
+           "Error " & Err.number & ": " & Err.Description, vbCritical
+End Sub
+
+
+
+
+
+Public Function LoadFromWord() As Boolean
+    Dim Doc As Document: Set Doc = ThisDocument
+    Dim part As Office.CustomXMLPart
+
+    For Each part In Doc.CustomXMLParts
+        If InStr(1, part.xml, "urn:my-chem-namespace") > 0 Then
+            Me.LoadFromXml part.xml
+            LoadFromWord = True
+            Exit Function
+        End If
+    Next part
+
+    LoadFromWord = False
+End Function
+
+Public Function Validate() As Boolean
+    Dim cmp As Compound, ok As Boolean
+    ok = True
+    For Each cmp In compounds
+        If cmp.amount Is Nothing Then
+            Debug.Print "[ERROR] Compound '" & cmp.id & "' has no amount set."
+            ok = False
+        ElseIf cmp.Stoffdaten Is Nothing Then
+            Debug.Print "[ERROR] Compound '" & cmp.id & "' missing Stoffdaten."
+            ok = False
+        End If
+    Next cmp
+    Validate = ok
+End Function
+
+Public Sub PruneOrphaned()
+    Dim i As Long
+    For i = compounds.count To 1 Step -1
+        Dim cmp As Compound
+        Set cmp = compounds.item(i)
+        If ContentControlHelpers.FindControlByTag(cmp.id) Is Nothing Then
+            Debug.Print "[PRUNE] Removing orphaned compound: " & cmp.id
+            compounds.Remove cmp.id
+        End If
+    Next i
+End Sub
+
+Public Sub SaveClean()
+    Me.PruneOrphaned
+    Me.SortByStepNumber
+    'Me.SaveToWord
+    Me.ValidateRoundTripWithCheck
+End Sub
+
+
+Public Sub ScaleAllMasses(ByVal factor As Double)
+    Dim i As Long
+    For i = 1 To Me.count
+        Dim cmp As Compound
+        Set cmp = Me.item(i)
+
+        If cmp.amount Is Nothing Then
+            Debug.Print "[SKIP] Compound with ID " & cmp.id & " has no amount."
+            GoTo NextCompound
+        End If
+
+        Dim oldMass As Double: oldMass = cmp.amount.mass
+        cmp.amount.SetMass oldMass * factor, cmp.Stoffdaten
+
+NextCompound:
+    Next i
+End Sub
+
+
+
+Public Function PromptCompoundSelection() As Compound
+    ' Let user choose a compound and ensure it becomes a reactant
+    If Me.count = 0 Then
+        MsgBox "No compounds available to select.", vbInformation
+        Exit Function
+    End If
+
+    Dim cmp As Compound, i As Long
+    Dim msg As String: msg = "Select a compound:" & vbCrLf
+
+    For i = 1 To Me.count
+        Set cmp = Me.item(i)
+        msg = msg & i & ". " & cmp.ToDisplayString("weight_name_code", Me.GetReferenceCompound()) & vbCrLf
+    Next i
+
+    Dim choice As Variant
+    choice = InputBox(msg, "Reference Compound Selection")
+    If Not IsNumeric(choice) Then Exit Function
+    If CLng(choice) < 1 Or CLng(choice) > Me.count Then Exit Function
+
+    Dim sel As Compound
+    Set sel = Me.item(CLng(choice))
+    ' Force selected compound to be a reactant when used as reference
+    sel.compoundType = "reactant"
+
+
+
+    Set PromptCompoundSelection = sel
+End Function
+
+
+Public Sub SortByStepNumber(Optional descending As Boolean = False)
+    Dim sortedList() As Compound
+    Dim cmp As Compound
+    Dim i As Long, j As Long
+    Dim temp As Compound
+   '  If there are fewer than 2 compounds, no need to sort:
+    If compounds.count < 2 Then
+        Exit Sub
+    End If
+    ' Copy compounds to array
+    ReDim sortedList(1 To compounds.count)
+    For i = 1 To compounds.count
+        Set sortedList(i) = compounds.item(i)
+    Next i
+
+    ' Insertion sort by step number
+    For i = 2 To UBound(sortedList)
+        Set temp = sortedList(i)
+        j = i - 1
+        Do While j > 0
+            Dim stepJ As Long, stepTemp As Long
+            stepJ = GetStepNumberFromId(sortedList(j).id)
+            stepTemp = GetStepNumberFromId(temp.id)
+
+            If descending Then
+                If stepTemp > stepJ Then
+                    Set sortedList(j + 1) = sortedList(j)
+                    j = j - 1
+                Else
+                    Exit Do
+                End If
+            Else
+                If stepTemp < stepJ Then
+                    Set sortedList(j + 1) = sortedList(j)
+                    j = j - 1
+                Else
+                    Exit Do
+                End If
+            End If
+        Loop
+        Set sortedList(j + 1) = temp
+    Next i
+
+    ' Rebuild compounds collection in sorted order
+    Set compounds = New Collection
+    For i = 1 To UBound(sortedList)
+        compounds.Add sortedList(i), sortedList(i).id
+    Next i
+End Sub
+
+'=== Corrected Update to CompoundCollection.GetTextByTag ===
+' Purpose: Keep original optimized field lookups.
+' Only fix fallback case (Else) to pass reference safely to ToDisplayString.
+' Also add a comment noting future refactor potential.
+
+Public Function GetTextByTag(tag As String, ByRef found As Boolean) As String
+    On Error GoTo ErrorHandler
+
+    Dim compoundId As String
+    Dim key As String
+    Dim parts() As String
+    Dim cmp As Compound
+
+    found = False
+    GetTextByTag = "N/A"
+
+    parts = Split(tag, "-")
+
+    If UBound(parts) = 0 Then
+        compoundId = parts(0)
+        key = "display"
+    ElseIf UBound(parts) = 1 Then
+        compoundId = parts(0)
+        key = LCase(parts(1))
+    Else
+        Exit Function
+    End If
+
+    Set cmp = Me.GetById(compoundId)
+    If cmp Is Nothing Then Exit Function
+
+    ' Optimized direct field lookup
+    Select Case key
+        Case "title"
+            If Not cmp.Stoffdaten Is Nothing Then
+                GetTextByTag = cmp.Stoffdaten.title
+            End If
+
+        Case "code"
+            If Not cmp.Stoffdaten Is Nothing Then
+                GetTextByTag = cmp.Stoffdaten.productCode
+            End If
+
+        Case "mass"
+            If Not cmp.amount Is Nothing Then
+                GetTextByTag = format(cmp.amount.mass, "0.00") & " g"
+            End If
+
+        Case "volume"
+            If Not cmp.amount Is Nothing Then
+                GetTextByTag = format(cmp.amount.Volume, "0.0") & " mL"
+            End If
+
+        Case "amount"
+            If Not cmp.amount Is Nothing Then
+                GetTextByTag = format(cmp.amount.MolarAmount * 1000, "0.0") & " mmol"
+            End If
+
+        Case "type"
+            GetTextByTag = cmp.compoundType
+
+        Case "assay"
+            GetTextByTag = format(cmp.amount.Assay, "0.00") & "w%"
+
+        Case Else
+            ' Refactored: Always pass reference explicitly to ToDisplayString (for "edit" safety)
+            GetTextByTag = cmp.ToDisplayString(key, Me.GetReferenceCompound())
+            ' NOTE: Future refactor idea: Move this Select Case logic into Compound itself (e.g., Compound.GetFieldByKey)
+    End Select
+
+    found = True
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "[ERROR] GetTextByTag failed for tag '" & tag & "': " & Err.Description
+    Err.Clear
+End Function
+

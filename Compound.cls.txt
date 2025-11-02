@@ -1,0 +1,388 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "Compound"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+'=== FILE: Compound.cls ===
+Option Explicit
+
+Private pID As String
+Private pCompoundType As String
+Private pStoffdaten As Stoffdaten
+Private pAmount As CompoundAmount
+Private pInstructAssayCorrection As Boolean ' Display flag only
+
+'=== ID ===
+Public Property Get id() As String
+    id = pID
+End Property
+
+Public Property Let id(ByVal value As String)
+    pID = value
+End Property
+
+'=== CompoundType ===
+Public Property Get compoundType() As String
+    compoundType = pCompoundType
+End Property
+
+Public Property Let compoundType(ByVal value As String)
+    pCompoundType = value
+End Property
+
+'=== Stoffdaten ===
+Public Property Get Stoffdaten() As Stoffdaten
+    Set Stoffdaten = pStoffdaten
+End Property
+
+Public Property Set Stoffdaten(ByVal value As Stoffdaten)
+    Set pStoffdaten = value
+End Property
+
+'=== Amount ===
+Public Property Get amount() As CompoundAmount
+    Set amount = pAmount
+End Property
+
+Public Property Set amount(ByVal value As CompoundAmount)
+    Set pAmount = value
+End Property
+
+'=== Assay Display Instruction ===
+Public Property Get InstructAssayCorrection() As Boolean
+    InstructAssayCorrection = pInstructAssayCorrection
+End Property
+
+Public Property Let InstructAssayCorrection(ByVal value As Boolean)
+    pInstructAssayCorrection = value
+End Property
+
+'=== XML Serialization ===
+Public Function ToXmlNode(Doc As Object) As Object
+    Dim node As Object
+    Set node = Doc.createElement("Compound")
+
+    node.setAttribute "id", SanitizeXmlValue(Me.id)
+    node.setAttribute "type", SanitizeXmlValue(Me.compoundType)
+    node.setAttribute "instructAssayCorrection", IIf(Me.InstructAssayCorrection, "true", "false")
+
+    ' Stoffdaten Node
+    If Not Me.Stoffdaten Is Nothing Then
+        Dim stoffNode As Object
+        Set stoffNode = Doc.createElement("Stoffdaten")
+        stoffNode.setAttribute "productCode", SanitizeXmlValue(Me.Stoffdaten.productCode)
+        stoffNode.setAttribute "title", SanitizeXmlValue(Me.Stoffdaten.title)
+        stoffNode.setAttribute "molarMass", SanitizeXmlValue(CStr(Me.Stoffdaten.molarMass))
+        stoffNode.setAttribute "density", SanitizeXmlValue(CStr(Me.Stoffdaten.Density))
+        node.appendChild stoffNode
+    End If
+
+    ' Amount Node
+    If Not Me.amount Is Nothing Then
+        Dim amtNode As Object
+        Set amtNode = Doc.createElement("Amount")
+        amtNode.setAttribute "mass", SanitizeXmlValue(CStr(Me.amount.mass))
+        amtNode.setAttribute "volume", SanitizeXmlValue(CStr(Me.amount.Volume))
+        amtNode.setAttribute "molarAmount", SanitizeXmlValue(CStr(Me.amount.MolarAmount))
+        amtNode.setAttribute "assay", SanitizeXmlValue(CStr(Me.amount.Assay))
+        node.appendChild amtNode
+    End If
+
+    Set ToXmlNode = node
+End Function
+
+
+Public Sub FromXmlNode(ByVal node As Object)
+    Me.id = node.Attributes.getNamedItem("id").text
+    Me.compoundType = node.Attributes.getNamedItem("type").text
+
+    If Not node.Attributes.getNamedItem("instructAssayCorrection") Is Nothing Then
+        Me.InstructAssayCorrection = (LCase(node.Attributes.getNamedItem("instructAssayCorrection").text) = "true")
+    Else
+        Me.InstructAssayCorrection = False
+    End If
+
+    ' Stoffdaten Node
+    Dim stoffNode As Object
+    Set stoffNode = node.SelectSingleNode("Stoffdaten")
+
+    If Not stoffNode Is Nothing Then
+        Dim stoff As New Stoffdaten
+        stoff.productCode = stoffNode.Attributes.getNamedItem("productCode").text
+        stoff.title = stoffNode.Attributes.getNamedItem("title").text
+        stoff.molarMass = CDbl(stoffNode.Attributes.getNamedItem("molarMass").text)
+        stoff.Density = CDbl(stoffNode.Attributes.getNamedItem("density").text)
+        Set Me.Stoffdaten = stoff
+    End If
+
+    ' Amount Node
+    Dim amtNode As Object
+    Set amtNode = node.SelectSingleNode("Amount")
+
+    If Not amtNode Is Nothing Then
+        Dim amt As New CompoundAmount
+        Set Me.amount = amt
+        amt.SetMass CDbl(amtNode.Attributes.getNamedItem("mass").text), Me.Stoffdaten
+
+        If Not amtNode.Attributes.getNamedItem("assay") Is Nothing Then
+            amt.Assay = CDbl(amtNode.Attributes.getNamedItem("assay").text)
+        Else
+            amt.Assay = 100#
+        End If
+    End If
+End Sub
+
+'=== FILE: Compound.cls (Factory Methods) ===
+
+'=== BuildFromStoffdaten ===
+Public Function BuildFromStoffdaten(ByVal stoff As Stoffdaten, ByVal tagId As String) As Compound
+    Dim c As New Compound
+    c.id = tagId
+    Set c.Stoffdaten = stoff
+
+    Dim amount As New CompoundAmount
+    Set c.amount = amount
+    amount.SetMass 100, stoff
+    amount.Assay = 100#
+
+    c.InstructAssayCorrection = False
+
+    Set BuildFromStoffdaten = c
+End Function
+
+' Helper to build a compound with common initialization
+Public Function BuildCompound(ByVal compoundId As String, ByVal compoundType As String) As Compound
+    ' Shared data initialization
+    Dim d As New Stoffdaten
+    d.productCode = "SY-1449"
+    d.title = "Reinstwasser"
+    d.molarMass = 18.015
+    d.Density = 1
+
+    ' Build and configure Compound
+    Dim c As Compound
+    Set c = BuildFromStoffdaten(d, compoundId)
+    c.compoundType = compoundType
+    c.InstructAssayCorrection = False
+
+    Set BuildCompound = c
+End Function
+
+'----------------------------------------------------------------------------
+Public Function BuildDefaultWaterCompound(ByVal compoundId As String) As Compound
+    Set BuildDefaultWaterCompound = _
+        BuildCompound(compoundId, "solvent")
+End Function
+
+Public Function BuildProduct(ByVal compoundId As String) As Compound
+    Set BuildProduct = _
+        BuildCompound(compoundId, "product")
+End Function
+
+'=== FILE: Compound.cls (ToDisplayString only) ===
+
+'=== ToDisplayString ===
+' NOTE: This method is retained in Compound class for convenience.
+' Further cleanup or extraction to a CompoundFormatter module is possible.
+' Compound.cls - ToDisplayString: build formatted string and apply reference flag
+' Supports detail levels "weight_name", "low", "high", "edit" with unified flagging
+' Compound.cls - ToDisplayString & GetSmartDisplayString with placeholder-based reference insertion
+' Compound.cls - Refined ToDisplayString & GetSmartDisplayString with edit-mode isReference inline
+' Compound.cls - ToDisplayString & GetSmartDisplayString with new weight_name_code mode
+Public Function ToDisplayString(Optional ByVal detailLevel As String = "low", Optional ByVal reference As Compound = Nothing) As String
+    On Error GoTo DisplayError
+    Dim txt As String
+    Dim isReference As Boolean
+
+    ' 1) Determine reference status
+    If Not reference Is Nothing Then
+        isReference = (Me.id = reference.id)
+    Else
+        isReference = False
+    End If
+
+    ' 2) Build base display text
+    Select Case LCase(detailLevel)
+        Case "weight_name_code", "weight_name"
+            ' Mass + title + code, with [REF] prefix if reference
+            If Not Me.amount Is Nothing And Not Me.Stoffdaten Is Nothing Then
+                txt = SigStr(Me.amount.mass) & " g " & Me.Stoffdaten.title & _
+                      " [" & Me.Stoffdaten.productCode & "]"
+                If isReference Then txt = "[REF] " & txt
+            Else
+                txt = "[N/D]"
+            End If
+        Case "low", "high"
+            ' Delegate to GetSmartDisplayString (includes REF placeholder)
+            txt = Me.GetSmartDisplayString(detailLevel, reference)
+
+        Case "edit"
+            Dim brk As String: brk = Chr(11)
+            ' Edit dump with inline isReference flag
+            txt = _
+                "product-code=" & Me.Stoffdaten.productCode & "; " & _
+                "title=" & Me.Stoffdaten.title & "; " & _
+                "type=" & Me.compoundType & ";"
+            If isReference Then txt = txt & " isReference;"
+            txt = txt & brk & _
+                "mass [g]=" & SigStr(Me.amount.mass, 4) & "; " & _
+                "volume [mL]=" & SigStr(Me.amount.Volume, 4) & ";" & brk & _
+                "assay=" & SigStr(Me.amount.Assay, 4) & "; " & _
+                "corrected amount [g]=" & SigStr(Me.amount.correctedMass, 4) & "; " & _
+                "corrected molar amount [mmol]=" & _
+                    SigStr(Me.amount.GetCorrectedMolarAmount(Me.Stoffdaten) * 1000, 4) & ";" & brk
+            If Not reference Is Nothing Then
+                On Error Resume Next
+                txt = txt & _
+                    "equiv=" & SigStr(Me.amount.GetEquiv(reference.amount, Me.Stoffdaten, reference.Stoffdaten), 4) & "; " & _
+                    "rel.volume [ml/g]=" & SigStr(Me.amount.GetRelativeVolume(reference.amount), 4) & ";" & brk
+                On Error GoTo 0
+            Else
+                txt = txt & "equiv=(no ref); rel.volume=(no ref);" & brk
+            End If
+            txt = txt & "instruct assay correction=" & LCase(CStr(Me.InstructAssayCorrection)) & ";"
+
+        Case Else
+        ' same as "weight_name_code", "weight_name"
+            ' Mass + title + code, with [REF] prefix if reference
+            If Not Me.amount Is Nothing And Not Me.Stoffdaten Is Nothing Then
+                txt = SigStr(Me.amount.mass) & " g " & Me.Stoffdaten.title & _
+                      " [" & Me.Stoffdaten.productCode & "]"
+                If isReference Then txt = "[REF] " & txt
+            Else
+                txt = "[N/D]"
+            End If
+    End Select
+
+    ' 3) Replace REF placeholder for low/high modes only
+    Const token As String = "{{_REF_}}"
+    If InStr(txt, token) > 0 Then
+        If isReference Then
+            txt = Replace(txt, token, " " & ChrW(&H2605), 1, 1)
+        Else
+            txt = Replace(txt, token, "", 1, 1)
+        End If
+    End If
+
+    ' 4) Return
+    ToDisplayString = txt
+    Exit Function
+
+DisplayError:
+    Debug.Print "[ERR] Error in ToDisplayString: " & Err.Description
+    Debug.Print "[ERR] Compound ID: " & Me.id & "; Level: " & detailLevel
+    Debug.Print "[ERR] Has amount: " & Not (Me.amount Is Nothing)
+    Debug.Print "[ERR] Has Stoffdaten: " & Not (Me.Stoffdaten Is Nothing)
+    ToDisplayString = "[ERROR: " & Err.Description & "]"
+End Function
+
+Public Function GetSmartDisplayString(ByVal detailLevel As String, Optional ByVal reference As Compound = Nothing) As String
+    Dim txt As String
+    Dim comparison As String: comparison = ""
+
+
+Dim isReference As Boolean
+If Not reference Is Nothing Then
+    isReference = (Me.id = reference.id)
+Else
+    isReference = False
+End If
+
+Dim code As String
+If Not Me.Stoffdaten Is Nothing Then
+    code = Me.Stoffdaten.productCode
+Else
+    code = ""
+End If
+
+
+
+    Select Case LCase(detailLevel)
+        Case "low"
+            If Me.compoundType = "solvent" Then
+                If Not Me.amount Is Nothing And Not Me.Stoffdaten Is Nothing Then
+                    txt = SigStr(Me.amount.mass) & " g (" & SigStr(Me.amount.Volume) & " mL) " & _
+                          Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "")
+                Else
+                    txt = "[N/D]"
+                End If
+
+            ElseIf Me.compoundType = "reactant" Then
+                Dim correctedMass As Double: correctedMass = Me.amount.correctedMass
+                If Me.InstructAssayCorrection Then
+                    txt = "Calculated amount (" & SigStr(correctedMass) & " g, 100 w%) " & _
+                          Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "") & _
+                          " 첽orrect for potency�"
+                Else
+                    If Me.amount.Assay = 100 And Me.amount.mass = correctedMass Then
+                        txt = SigStr(Me.amount.mass) & " g " & _
+                              Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "") & _
+                              " 첺s is�"
+                    Else
+                        txt = SigStr(Me.amount.mass) & " g (" & _
+                              SigStr(correctedMass) & " g, typ. " & _
+                              SigStr(Me.amount.Assay) & " w%) " & _
+                              Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "") & _
+                              " 첺s is�"
+                    End If
+                End If
+            Else
+                If Not Me.amount Is Nothing And Not Me.Stoffdaten Is Nothing Then
+                    txt = SigStr(Me.amount.mass) & " g " & _
+                          Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "")
+                Else
+                    txt = "[N/D]"
+                End If
+            End If
+
+        Case "high"
+            If Me.compoundType = "solvent" Then
+                txt = SigStr(Me.amount.mass) & " g (" & SigStr(Me.amount.Volume) & " mL) " & _
+                      Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "")
+                If Not reference Is Nothing Then On Error Resume Next: comparison = SigStr(Me.amount.GetRelativeVolume(reference.amount)) & " mL/g": On Error GoTo 0
+
+            ElseIf Me.compoundType = "reactant" Then
+                correctedMass = Me.amount.correctedMass
+                If Me.InstructAssayCorrection Then
+                    txt = "Calculated amount (" & SigStr(correctedMass) & " g, 100 w%) " & _
+                          Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "") & _
+                          " 첽orrect for potency�"
+                Else
+                    If Me.amount.Assay = 100 And Me.amount.mass = correctedMass Then
+                        txt = SigStr(Me.amount.mass) & " g " & _
+                              Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "") & _
+                              " 첺s is�"
+Else
+    txt = SigStr(Me.amount.mass) & " g (" & _
+          SigStr(correctedMass) & " g, typ. " & _
+          SigStr(Me.amount.Assay) & " w%) " & _
+          Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "") & _
+          " 첺s is�"
+End If
+                End If
+                If Not reference Is Nothing Then On Error Resume Next: comparison = SigStr(Me.amount.GetEquiv(reference.amount, Me.Stoffdaten, reference.Stoffdaten)) & " equiv": On Error GoTo 0
+            Else
+                txt = SigStr(Me.amount.mass) & " g " & _
+                      Me.Stoffdaten.title & IIf(code <> "", " [" & code & "]{{_REF_}}", "")
+            End If
+            If comparison <> "" Then txt = txt & " (" & comparison & ")"
+
+        Case Else
+            txt = "[Unsupported detail level: " & detailLevel & "]"
+    End Select
+
+    GetSmartDisplayString = txt
+End Function
+
+
+
+
+'REACTOR FUCK UP RESCUE
+Public Function GetEquivTo(ByVal other As Compound) As Double
+    GetEquivTo = Me.amount.GetEquiv(other.amount, Me.Stoffdaten, other.Stoffdaten)
+End Function
+

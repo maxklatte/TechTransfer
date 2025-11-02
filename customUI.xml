@@ -1,0 +1,64 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui">
+  <ribbon>
+    <tabs>
+      <tab id="MacroTabs" label="TechTransfer Macros">
+
+        <!-- === PROCESS BUILDER === -->
+        <group id="Group_ProcessBuilder" label="Process Builder">
+          <button id="Button_InsertUnitOp" label="Insert UnitOperations DropDown"
+                  onAction="ThisDocument.SafeCall" tag="InsertUnitOperationDropDown" imageMso="ContentControlDropDownList"/>
+          <button id="Button_AddUnitOp" label="Add UnitOperation"
+                  onAction="ThisDocument.SafeCall" tag="AddUnitOperation" imageMso="TableRowsInsertWord"/>
+          <button id="Button_CloneUnitOps" label="Clone UnitOperations"
+                  onAction="ThisDocument.SafeCall" tag="CloneUnitOps" imageMso="Copy"/>
+
+        </group>
+
+        <!-- === CHEMISTRY === -->
+        <group id="Group_Chemistry" label="Chemistry">
+          <button id="Button_SelectRefCompound" label="Select ReferenceCompound"
+                  onAction="ThisDocument.SafeCall" tag="SelectReferenceCompound" imageMso="FileSave"/>
+          <button id="Button_ScaleUp" label="Scale Up"
+                  onAction="ThisDocument.SafeCall" tag="ScaleUp" imageMso="ChartInsert"/>
+        </group>
+
+        <!-- === PROCESS VISUALIZATION === -->
+        <group id="Group_Visualization" label="Process Visualization">
+          <button id="Button_UpdateTables" label="Update Tables"
+                  onAction="ThisDocument.SafeCall" tag="ForceUpdateTables" imageMso="TableInsert"/>
+        </group>
+
+        <!-- === FIELD OPERATIONS === -->
+        <group id="Group_FieldOps" label="Field Operations">
+          <button id="Button_ExpandField" label="Expand Field"
+                  onAction="ThisDocument.SafeCall" tag="Expand" imageMso="ZoomIn"/>
+          <button id="Button_ComputeField" label="Compute Field"
+                  onAction="ThisDocument.SafeCall" tag="Compute" imageMso="CalculateNow"/>
+          <button id="Button_CollapseField" label="Collapse Field"
+                  onAction="ThisDocument.SafeCall" tag="Collapse" imageMso="ZoomOut"/>
+          <button id="Button_Refresh" label="Refresh Stoffdaten"
+                  onAction="ThisDocument.SafeCall" tag="Refresh" imageMso="DatabaseInsert"/>
+        </group>
+
+        <!-- === PROCESS TRANSLATOR === -->
+        <group id="Group_Translator" label="Process Translator">
+          <button id="Button_FlowChart" label="Generate Flow Chart"
+                  onAction="ThisDocument.SafeCall" tag="GenerateFlowChart" imageMso="AlignCenter"/>
+          <button id="Button_Laborvorschrift" label="Generate Laborvorschrift"
+                  onAction="ThisDocument.SafeCall" tag="GenerateLaborvorschrift" imageMso="FileNew"/>
+        </group>
+
+        <!-- === MACRO CONTROL === -->
+        <group id="Group_MacroControl" label="Macro Control">
+          <button id="Button_ReloadDB" label="Reload Stoffdatenbank"
+                  onAction="ThisDocument.SafeCall" tag="ForceReloadStoffdatenbank" imageMso="Refresh"/>
+          <button id="Button_ToggleTables" label="TableUpdates On/Off"
+                  onAction="ThisDocument.SafeCall" tag="ToggleTableUpdates" imageMso="ControlProperties"/>
+          <button id="Button_ToggleMacros" label="Macros On/Off"
+                  onAction="ThisDocument.SafeCall" tag="ToggleUserInteraction" imageMso="MacroSecurity"/>
+        </group>
+
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
