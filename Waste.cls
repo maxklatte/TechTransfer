@@ -1,0 +1,175 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "Waste"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+'=== CLASS MODULE: Waste ===
+Option Explicit
+
+Private pID As String
+Private pMass As Double
+Private pVolume As Double
+Private pWasteType As String
+Private pDescription As String
+
+Public Property Get id() As String: id = pID: End Property
+Public Property Let id(ByVal value As String): pID = value: End Property
+
+Public Property Get mass() As Double: mass = pMass: End Property
+Public Property Let mass(ByVal value As Double): pMass = value: End Property
+
+Public Property Get Volume() As Double: Volume = pVolume: End Property
+Public Property Let Volume(ByVal value As Double): pVolume = value: End Property
+
+Public Property Get WasteType() As String: WasteType = pWasteType: End Property
+Public Property Let WasteType(ByVal value As String): pWasteType = value: End Property
+
+Public Property Get Description() As String: Description = pDescription: End Property
+Public Property Let Description(ByVal value As String): pDescription = value: End Property
+
+Public Function BuildWaste(ByVal tagId As String) As Waste
+    Dim w As New Waste
+    w.id = tagId
+    w.mass = 0
+    w.Volume = 0
+    w.WasteType = "aqueous"
+    w.Description = ""
+    Set BuildWaste = w
+End Function
+
+Public Function GetChangedParts(ByVal editString As String) As Collection
+    Dim originalParts() As String
+    Dim userParts() As String
+    Dim i As Long
+    Dim changes As New Collection
+
+    originalParts = Split(Me.ToDisplayString("edit"), ";")
+    userParts = Split(editString, ";")
+
+    For i = LBound(originalParts) To UBound(originalParts)
+        If i > UBound(userParts) Then Exit For
+        If Trim(originalParts(i)) <> Trim(userParts(i)) Then
+            changes.Add Trim(userParts(i))
+        End If
+    Next i
+
+    If changes.count > 0 Then
+        'Debug.Print "[INFO] Changed values detected:"
+        For i = 1 To changes.count
+            Debug.Print " - " & changes(i)
+        Next i
+    End If
+
+    Set GetChangedParts = changes
+End Function
+
+Public Function ToDisplayString(Optional ByVal detailLevel As String = "low") As String
+    Dim txt As String
+
+    Select Case LCase(detailLevel)
+        Case "low"
+            txt = pDescription & " (" & SigStr(pMass) & " g, " & SigStr(pVolume) & " mL)"
+
+        Case "high"
+            txt = pDescription & " (" & SigStr(pMass) & " g, " & SigStr(pVolume) & " mL) - " & pWasteType
+
+        Case "edit"
+            txt = "description=" & pDescription & "; " & _
+                  "mass [g]=" & SigStr(pMass, 4) & "; " & _
+                  "volume [mL]=" & SigStr(pVolume, 4) & "; " & _
+                  "waste-type=" & pWasteType
+
+        Case Else
+            txt = "[Invalid display level: " & detailLevel & "]"
+    End Select
+
+    ToDisplayString = txt
+End Function
+
+
+
+Public Sub ApplyEditString(ByVal editString As String)
+    Dim changedParts As Collection
+    Set changedParts = GetChangedParts(editString)
+
+    Dim i As Long, kv() As String
+    Dim key As String, value As String
+
+    For i = 1 To changedParts.count
+        kv = Split(changedParts(i), "=")
+        If UBound(kv) <> 1 Then GoTo Skip
+
+        key = Trim(kv(0))
+        value = Trim(kv(1))
+
+        Select Case NormalizeKey(key)
+            Case "mass"
+                'Debug.Print "[ACTION] Mass changed to " & value
+                Me.mass = val(value)
+
+            Case "volume"
+                'Debug.Print "[ACTION] Volume changed to " & value
+                Me.Volume = val(value)
+
+            Case "waste-type"
+                'Debug.Print "[ACTION] WasteType changed to " & value
+                Me.WasteType = value
+
+            Case "description"
+                'Debug.Print "[ACTION] Description changed to " & value
+                Me.Description = value
+        End Select
+Skip:
+    Next i
+End Sub
+
+Public Function ToXmlNode(doc As Object) As Object
+    Dim node As Object
+    Set node = doc.createElement("Waste")
+
+    node.setAttribute "id", SanitizeXmlValue(Me.id)
+    node.setAttribute "wasteType", SanitizeXmlValue(Me.WasteType)
+    node.setAttribute "description", SanitizeXmlValue(Me.Description)
+
+    If Not isEmpty(Me.mass) Then
+        Dim massNode As Object: Set massNode = doc.createElement("Mass")
+        massNode.text = SanitizeXmlValue(CStr(Me.mass))
+        node.appendChild massNode
+    End If
+
+    If Not isEmpty(Me.Volume) Then
+        Dim volNode As Object: Set volNode = doc.createElement("Volume")
+        volNode.text = SanitizeXmlValue(CStr(Me.Volume))
+        node.appendChild volNode
+    End If
+
+    Set ToXmlNode = node
+End Function
+
+
+Public Sub FromXmlNode(ByVal node As Object)
+    'Debug.Print "[XML] Reading <Waste> id=" & node.Attributes.getNamedItem("id").text
+
+    Me.id = node.Attributes.getNamedItem("id").text
+    Me.WasteType = node.Attributes.getNamedItem("wasteType").text
+    Me.Description = node.Attributes.getNamedItem("description").text
+
+    Me.mass = CDbl(node.SelectSingleNode("Mass").text)
+    Me.Volume = CDbl(node.SelectSingleNode("Volume").text)
+End Sub
+
+Private Function NormalizeKey(key As String) As String
+    Select Case LCase(Trim(key))
+        Case "mass", "mass [g]": NormalizeKey = "mass"
+        Case "volume", "volume [ml]": NormalizeKey = "volume"
+        Case "waste-type": NormalizeKey = "waste-type"
+        Case "description": NormalizeKey = "description"
+        Case Else: NormalizeKey = ""
+    End Select
+End Function
+
+

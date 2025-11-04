@@ -37,15 +37,20 @@
           <button id="Button_CollapseField" label="Collapse Field"
                   onAction="ThisDocument.SafeCall" tag="Collapse" imageMso="ZoomOut"/>
           <button id="Button_Refresh" label="Refresh Stoffdaten"
-                  onAction="ThisDocument.SafeCall" tag="Refresh" imageMso="DatabaseInsert"/>
+                  onAction="ThisDocument.SafeCall" tag="Refresh" imageMso="GroupDatabaseTools"/>
         </group>
 
         <!-- === PROCESS TRANSLATOR === -->
         <group id="Group_Translator" label="Process Translator">
           <button id="Button_FlowChart" label="Generate Flow Chart"
                   onAction="ThisDocument.SafeCall" tag="GenerateFlowChart" imageMso="AlignCenter"/>
+          <button id="Button_UFlowChart" label="Update Flow Chart"
+                  onAction="ThisDocument.SafeCall" tag="UpdateFlowChartFields" imageMso="MailMergeUpdateLabels"/>
           <button id="Button_Laborvorschrift" label="Generate Laborvorschrift"
                   onAction="ThisDocument.SafeCall" tag="GenerateLaborvorschrift" imageMso="FileNew"/>
+          <button id="Button_ULaborvorschrift" label="Update Laborvorschrift"
+                  onAction="ThisDocument.SafeCall" tag="UpdateLaborvorschriftFields" imageMso="ReplaceDialog"/>
+
         </group>
 
         <!-- === MACRO CONTROL === -->
